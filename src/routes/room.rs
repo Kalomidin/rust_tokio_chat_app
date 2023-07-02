@@ -72,6 +72,7 @@ pub async fn join_room(
 pub async fn leave_room(
   State(pool): State<ConnectionPool>,
   Extension(user_id): Extension<i64>,
+  Extension(lobby): Extension<Arc<Lobby>>,
   Path(room_id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
   let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
@@ -89,6 +90,27 @@ pub async fn leave_room(
     delete_room(&mut conn, room_id)
       .await
       .map_err(db_error_to_service_error)?;
+  }
+  let user = get_user_by_id(&mut conn, user_id)
+    .await
+    .map_err(db_error_to_service_error)?;
+  let user_name = user.name.clone();
+  {
+    let mut lobby_mutex = lobby.rooms.lock().unwrap();
+    let room = lobby_mutex.get_mut(&room_id).unwrap();
+    room
+      .tx
+      .send(
+        serde_json::to_string(&ClientWsMessage {
+          member_id: deleted_member_id,
+          member_name: user_name,
+          message_type: ClientWsMessageType::Leave,
+          message: "left the room by user's request".to_owned(),
+        })
+        .unwrap(),
+      )
+      .unwrap();
+    println!("Sent leave message to user {:}", user_id);
   }
 
   Ok(Json(serde_json::json!({
@@ -136,21 +158,21 @@ pub async fn remove_member(
 
   let user_name = user.name.clone();
   {
-      let mut lobby_mutex = lobby.rooms.lock().unwrap();
-      let room = lobby_mutex.get_mut(&room_id).unwrap();
-      room
-        .tx
-        .send(
-          serde_json::to_string(&ClientWsMessage {
-            member_id: deleted_member_id,
-            member_name: user_name,
-            message_type: ClientWsMessageType::Kick,
-            message: "user is kicked".to_owned(),
-          })
-          .unwrap(),
-        )
-        .unwrap();
-      println!("Sent kick message to user {:}", user_id);
+    let mut lobby_mutex = lobby.rooms.lock().unwrap();
+    let room = lobby_mutex.get_mut(&room_id).unwrap();
+    room
+      .tx
+      .send(
+        serde_json::to_string(&ClientWsMessage {
+          member_id: deleted_member_id,
+          member_name: user_name,
+          message_type: ClientWsMessageType::Leave,
+          message: "user is kicked".to_owned(),
+        })
+        .unwrap(),
+      )
+      .unwrap();
+    println!("Sent kick message to user {:}", user_id);
   }
 
   Ok(Json(serde_json::json!({

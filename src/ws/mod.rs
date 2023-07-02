@@ -12,5 +12,5 @@ pub struct ClientWsMessage {
 #[derive(Serialize, Deserialize)]
 pub enum ClientWsMessageType {
   Message,
-  Kick,
+  Leave,
 }

@@ -232,7 +232,7 @@ fn create_sender_task(
     while let Ok(msg) = rx.recv().await {
       match serde_json::from_str::<ClientWsMessage>(&msg) {
         Ok(m) => match m.message_type {
-          ClientWsMessageType::Kick => {
+          ClientWsMessageType::Leave => {
             if m.member_id == member.id {
               let msg = Message::Text(m.message);
               if sender.send(msg).await.is_err() {
