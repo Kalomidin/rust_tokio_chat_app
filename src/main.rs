@@ -8,13 +8,9 @@ use rust_tokio_chat_app::db::setup_conn_pool;
 use rust_tokio_chat_app::routes::room::{create_room, join_room, leave_room, remove_member};
 use rust_tokio_chat_app::routes::user::{get_user, login, signup};
 use rust_tokio_chat_app::ws::lobby::Lobby;
-use std::{
-  sync::{Arc},
-};
-
+use std::sync::Arc;
 
 //allows to extract the IP of connecting user
-
 
 use std::net::SocketAddr;
 

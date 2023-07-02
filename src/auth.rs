@@ -1,4 +1,4 @@
-use crate::db::user::{get_user_by_id};
+use crate::db::user::get_user_by_id;
 use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
 use crate::{errors::ServiceError, ConnectionPool};
 use axum::{

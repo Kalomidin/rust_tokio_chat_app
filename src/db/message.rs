@@ -17,12 +17,10 @@ pub async fn add_message(
   conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
   room_id: i64,
   sender_id: i64,
-  msg: String,
+  msg: &str,
 ) -> Result<(), tokio_postgres::Error> {
-  let query = "INSERT INTO messages (room_id, sender_id, msg) VALUES ($1, $2, $3)";
-  conn
-    .execute(query, &[&room_id, &sender_id, &msg])
-    .await?;
+  let query = "INSERT INTO message (room_id, sender_id, msg) VALUES ($1, $2, $3)";
+  conn.execute(query, &[&room_id, &sender_id, &msg]).await?;
   Ok(())
 }
 
@@ -32,7 +30,7 @@ pub async fn get_unread_messages(
   last_seen_at: DateTime<chrono::Utc>,
 ) -> Result<Vec<Message>, tokio_postgres::Error> {
   let query =
-    "SELECT * FROM messages WHERE room_id = $1 AND created_at > $2 ORDER BY created_at ASC";
+    "SELECT * FROM message WHERE room_id = $1 AND created_at > $2 ORDER BY created_at ASC";
   let rows = conn.query(query, &[&room_id, &last_seen_at]).await?;
   let mut messages = Vec::new();
   for row in rows {

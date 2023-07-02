@@ -1,15 +1,13 @@
-use axum::{
-  extract::ws::{Message, WebSocket},
-};
-use bb8::{Pool};
+use axum::extract::ws::{Message, WebSocket};
+use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 
 use super::ClientWsMessage;
-use tokio_postgres::{NoTls};
-
+use tokio_postgres::NoTls;
 
 use std::{
   collections::{HashMap, HashSet},
+  mem,
   sync::{Arc, Mutex},
 };
 
@@ -21,14 +19,11 @@ use futures_util::{
 use std::ops::ControlFlow;
 use tokio::sync::broadcast;
 
-use crate::db::member::{Member};
-use crate::db::message::{add_message};
-use crate::errors::{internal_error_to_service_error};
+use crate::db::member::{Member, update_last_joined_at};
+use crate::db::message::add_message;
+use crate::errors::internal_error_to_service_error;
 
-use crate::{
-  db::room::{Room},
-  errors::ServiceError,
-};
+use crate::{db::room::Room, errors::ServiceError};
 
 pub struct Lobby {
   // We require unique usernames. This tracks which usernames have been taken.
@@ -76,6 +71,8 @@ pub async fn upgrade_to_websocket(
   let (sender, receiver) = stream.split();
   // We have more state now that needs to be pulled out of the connect loop
   let mut tx: Option<broadcast::Sender<String>> = None::<broadcast::Sender<String>>;
+  let member_id = member.id;
+  let room_id = room.id;
 
   {
     // create or get the room state
@@ -98,11 +95,11 @@ pub async fn upgrade_to_websocket(
 
   let rx_db = tx.subscribe();
 
-  let mut db_write_task = create_db_write_task(room.id, rx_db, state.pool.clone());
-
   let mut sender_task = create_sender_task(sender, rx, member.clone());
 
-  let mut receiver_task = create_receiver_task(receiver, tx, member, user_name);
+  let mut db_write_task = create_db_write_task(room.id, rx_db, state.pool.clone());
+
+  let mut receiver_task = create_receiver_task(receiver, tx.clone(), member, user_name.clone());
 
   // If any one of the tasks run to completion, we abort the other.
   tokio::select! {
@@ -120,9 +117,14 @@ pub async fn upgrade_to_websocket(
       },
   };
 
-  // send "user left" message
-
   {
+    // send "user left" message
+    let msg = ClientWsMessage {
+      member_id,
+      member_name: user_name.clone(),
+      message: format!("{} left the room", user_name),
+    };
+    tx.send(serde_json::to_string(&msg).unwrap()).unwrap();
     // remove the user from the room
     let mut rooms = state.rooms.lock().unwrap();
     let room_state = rooms.get_mut(&room.id).unwrap();
@@ -130,9 +132,20 @@ pub async fn upgrade_to_websocket(
     if room_state.clients.is_empty() {
       rooms.remove(&room.id);
     }
+    let pool = state.pool.clone();
+    // update db status for member's table
+    tokio::spawn(async move {
+      let mut conn: bb8::PooledConnection<'_, PostgresConnectionManager<NoTls>> = pool.get().await.map_err(internal_error_to_service_error).unwrap();
+      match update_last_joined_at(&mut conn, room_id, member_id).await {
+        Ok(_) => {
+          println!(">>> {} left the room", user_name);
+        }
+        Err(e) => {
+          println!("error updating last_joined_at for member: {}, err: {}", user_name, e);
+        }
+      }
+    });
   }
-
-  // update db status for member's table
 }
 
 fn create_db_write_task(
@@ -145,21 +158,16 @@ fn create_db_write_task(
       match serde_json::from_str::<ClientWsMessage>(&msg) {
         Ok(m) => {
           let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
-          if add_message(
-            &mut conn,
-            room_id,
-            m.member_id,
-            m.member_name,
-          )
-          .await
-          .is_err()
-          {
-            println!(
-              "error saving msg: {:?} from {} in to db",
-              m.member_id, m.message
-            );
-          } else {
-            println!(">>> {} sent msg: {:?} saved in db", m.member_id, m.message);
+          match add_message(&mut conn, room_id, m.member_id, &m.message).await {
+            Ok(_) => {
+              println!(">>> {} sent msg: {:?} saved in db", m.member_id, m.message);
+            }
+            Err(e) => {
+              println!(
+                "error saving msg: {:?} from {} in to db, err: {:}",
+                m.message, m.member_id, e
+              );
+            }
           }
         }
         _ => {
