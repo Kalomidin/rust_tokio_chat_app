@@ -6,6 +6,8 @@ use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::{config::Config, NoTls};
 use tokio_postgres_migration::Migration;
 
+pub mod member;
+pub mod room;
 pub mod user;
 
 const SCRIPTS_UP: [(&str, &str); 4] = [

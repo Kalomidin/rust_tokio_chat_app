@@ -1,7 +1,5 @@
 use crate::errors::ServiceError;
-use crate::{internal_error, ConnectionPool};
 use axum::{
-  extract::State,
   headers::{authorization::Bearer, Authorization},
   http::{Request, StatusCode},
   middleware::Next,

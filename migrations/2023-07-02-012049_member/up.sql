@@ -5,5 +5,6 @@ CREATE TABLE room_member (
   member_id bigint NOT NULL  REFERENCES users(id),
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   last_joined_at timestamp with time zone DEFAULT now() NOT NULL,
-  deleted_at timestamp with time zone DEFAULT NULL
+  deleted_at timestamp with time zone DEFAULT NULL,
+  unique (room_id, member_id)
 )
