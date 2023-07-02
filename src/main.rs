@@ -1,14 +1,12 @@
-use axum::{
-  routing::get,
-  Router,
-};
+use axum::{routing::get, routing::post, Router};
 
-
+use axum::middleware;
 use dotenv::dotenv;
+use rust_tokio_chat_app::auth::guard;
 use rust_tokio_chat_app::db::setup_conn_pool;
+use rust_tokio_chat_app::routes::user::{signup, login, get_user};
 
 use std::net::SocketAddr;
-
 
 #[tokio::main]
 async fn main() {
@@ -19,6 +17,10 @@ async fn main() {
 
   // build our application with some routes
   let app = Router::new()
+    .route("/users", get(get_user))
+    .route_layer(middleware::from_fn(guard))
+    .route("/users/signup", post(signup))
+    .route("/users/login", post(login))
     .route("/health", get(heath_check))
     .with_state(pool);
 
