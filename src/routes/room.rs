@@ -6,7 +6,8 @@ use crate::db::user::{get_user_by_id, get_user_by_name};
 
 use crate::errors::ServiceError;
 use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
-use crate::ws::lobby::{upgrade_to_websocket, Lobby};
+use crate::ws::lobby::{remove_user_from_room, upgrade_to_websocket, Lobby};
+use crate::ws::{ClientWsMessage, ClientWsMessageType};
 use crate::ConnectionPool;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -77,7 +78,7 @@ pub async fn leave_room(
   let room = get_room_by_id(&mut conn, room_id)
     .await
     .map_err(db_error_to_service_error)?;
-  let member = delete_member(&mut conn, room.id, user_id)
+  let deleted_member_id = delete_member(&mut conn, room.id, user_id)
     .await
     .map_err(db_error_to_service_error)?;
 
@@ -93,15 +94,14 @@ pub async fn leave_room(
   Ok(Json(serde_json::json!({
   "roomName": room.name,
   "createdAt": room.created_at,
-  "memberCreatedAt": member.created_at,
-  "memberDeletedAt": member.deleted_at,
-  "memberId": member.id,
+  "memberId": deleted_member_id,
   "activeMembersCount": active_member_count,
   })))
 }
 
 pub async fn remove_member(
   State(pool): State<ConnectionPool>,
+  Extension(lobby): Extension<Arc<Lobby>>,
   Extension(user_id): Extension<i64>,
   Path(room_id): Path<i64>,
   Json(remove_user_request): Json<RemoveUserRequest>,
@@ -121,7 +121,7 @@ pub async fn remove_member(
     .await
     .map_err(db_error_to_service_error)?;
 
-  delete_member(&mut conn, room.id, user.id)
+  let deleted_member_id = delete_member(&mut conn, room.id, user.id)
     .await
     .map_err(db_error_to_service_error)?;
 
@@ -132,6 +132,25 @@ pub async fn remove_member(
     delete_room(&mut conn, room_id)
       .await
       .map_err(db_error_to_service_error)?;
+  }
+
+  let user_name = user.name.clone();
+  {
+      let mut lobby_mutex = lobby.rooms.lock().unwrap();
+      let room = lobby_mutex.get_mut(&room_id).unwrap();
+      room
+        .tx
+        .send(
+          serde_json::to_string(&ClientWsMessage {
+            member_id: deleted_member_id,
+            member_name: user_name,
+            message_type: ClientWsMessageType::Kick,
+            message: "user is kicked".to_owned(),
+          })
+          .unwrap(),
+        )
+        .unwrap();
+      println!("Sent kick message to user {:}", user_id);
   }
 
   Ok(Json(serde_json::json!({

@@ -2,12 +2,11 @@ use axum::extract::ws::{Message, WebSocket};
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 
-use super::ClientWsMessage;
+use super::{ClientWsMessage, ClientWsMessageType};
 use tokio_postgres::NoTls;
 
 use std::{
   collections::{HashMap, HashSet},
-  mem,
   sync::{Arc, Mutex},
 };
 
@@ -19,7 +18,7 @@ use futures_util::{
 use std::ops::ControlFlow;
 use tokio::sync::broadcast;
 
-use crate::db::member::{Member, update_last_joined_at};
+use crate::db::member::{update_last_joined_at, Member};
 use crate::db::message::add_message;
 use crate::errors::internal_error_to_service_error;
 
@@ -33,11 +32,11 @@ pub struct Lobby {
 
 pub struct RoomState {
   // The set of all connected clients.
-  clients: HashSet<i64>,
+  pub clients: HashSet<i64>,
 
   // The name of the room.
-  name: String,
-  tx: broadcast::Sender<String>,
+  pub name: String,
+  pub tx: broadcast::Sender<String>,
 }
 
 impl Lobby {
@@ -72,7 +71,6 @@ pub async fn upgrade_to_websocket(
   // We have more state now that needs to be pulled out of the connect loop
   let mut tx: Option<broadcast::Sender<String>> = None::<broadcast::Sender<String>>;
   let member_id = member.id;
-  let room_id = room.id;
 
   {
     // create or get the room state
@@ -104,48 +102,77 @@ pub async fn upgrade_to_websocket(
   // If any one of the tasks run to completion, we abort the other.
   tokio::select! {
       _ = (&mut sender_task) => {
+        println!("sender task completed, member_id: {}, room_id: {}", member_id, room.id);
         receiver_task.abort();
         db_write_task.abort();
       },
       _ = (&mut receiver_task) => {
+        println!("receiver task completed, member_id: {}, room_id: {}", member_id, room.id);
         sender_task.abort();
         db_write_task.abort();
       },
       _ = (&mut db_write_task) => {
+        println!("db write task completed, member_id: {}, room_id: {}", member_id, room.id);
         sender_task.abort();
         receiver_task.abort();
       },
   };
 
+  let room_id: i64 = room.id;
+  remove_user_from_room(member_id, user_id, room_id, user_name, tx, state);
+}
+
+pub fn remove_user_from_room(
+  member_id: i64,
+  user_id: i64,
+  room_id: i64,
+  user_name: String,
+  tx: broadcast::Sender<String>,
+  state: Arc<Lobby>,
+) {
+  // send "user left" message
+  let msg = ClientWsMessage {
+    member_id,
+    message_type: ClientWsMessageType::Message,
+    member_name: user_name.clone(),
+    message: format!("{} left the room", user_name),
+  };
+  tx.send(serde_json::to_string(&msg).unwrap()).unwrap();
   {
-    // send "user left" message
-    let msg = ClientWsMessage {
-      member_id,
-      member_name: user_name.clone(),
-      message: format!("{} left the room", user_name),
-    };
-    tx.send(serde_json::to_string(&msg).unwrap()).unwrap();
     // remove the user from the room
     let mut rooms = state.rooms.lock().unwrap();
-    let room_state = rooms.get_mut(&room.id).unwrap();
+    println!(">>> removing user from room: {}", room_id);
+    let room_state = match rooms.get_mut(&room_id) {
+      Some(room_state) => room_state,
+      None => return,
+    };
     room_state.clients.remove(&user_id);
     if room_state.clients.is_empty() {
-      rooms.remove(&room.id);
+      rooms.remove(&room_id);
     }
-    let pool = state.pool.clone();
-    // update db status for member's table
-    tokio::spawn(async move {
-      let mut conn: bb8::PooledConnection<'_, PostgresConnectionManager<NoTls>> = pool.get().await.map_err(internal_error_to_service_error).unwrap();
-      match update_last_joined_at(&mut conn, room_id, member_id).await {
-        Ok(_) => {
-          println!(">>> {} left the room", user_name);
-        }
-        Err(e) => {
-          println!("error updating last_joined_at for member: {}, err: {}", user_name, e);
-        }
-      }
-    });
   }
+  let pool = state.pool.clone();
+
+  // update db status for member's table
+  tokio::spawn(async move {
+    let mut conn: bb8::PooledConnection<'_, PostgresConnectionManager<NoTls>> = pool
+      .get()
+      .await
+      .map_err(internal_error_to_service_error)
+      .unwrap();
+    match update_last_joined_at(&mut conn, room_id, member_id).await {
+      Ok(_) => {
+        println!(">>> {} left the room", user_name);
+      }
+      Err(e) => {
+        println!(
+          "error updating last_joined_at for member: {}, err: {}",
+          user_name, e
+        );
+        println!("member_id: {}, room_id: {}", member_id, room_id);
+      }
+    }
+  });
 }
 
 fn create_db_write_task(
@@ -204,26 +231,37 @@ fn create_sender_task(
   tokio::spawn(async move {
     while let Ok(msg) = rx.recv().await {
       match serde_json::from_str::<ClientWsMessage>(&msg) {
-        Ok(m) => {
-          // In any websocket error, break loop.
-          if member.id != m.member_id
-            && sender
-              .send(Message::Text(m.message.to_owned()))
-              .await
-              .is_err()
-          {
-            println!(
-              "error sending message from {} to {}",
-              m.member_id, member.id
-            );
-            break;
-          } else {
-            println!(
-              ">>> {} sent str: {:?} to {}",
-              m.member_id, m.message, member.id
-            );
+        Ok(m) => match m.message_type {
+          ClientWsMessageType::Kick => {
+            if m.member_id == member.id {
+              let msg = Message::Text(m.message);
+              if sender.send(msg).await.is_err() {
+                break;
+              }
+              return;
+            }
           }
-        }
+          ClientWsMessageType::Message => {
+            // In any websocket error, break loop.
+            if member.id != m.member_id
+              && sender
+                .send(Message::Text(m.message.to_owned()))
+                .await
+                .is_err()
+            {
+              println!(
+                "error sending message from {} to {}",
+                m.member_id, member.id
+              );
+              break;
+            } else {
+              println!(
+                ">>> {} sent str: {:?} to {}",
+                m.member_id, m.message, member.id
+              );
+            }
+          }
+        },
         _ => {
           println!("error parsing message");
         }
@@ -246,6 +284,7 @@ fn process_message(
         serde_json::to_string(&ClientWsMessage {
           member_id,
           member_name,
+          message_type: ClientWsMessageType::Message,
           message: t,
         })
         .unwrap(),

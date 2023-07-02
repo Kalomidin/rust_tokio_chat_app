@@ -53,7 +53,9 @@ pub fn db_error_to_service_error(err: tokio_postgres::Error) -> ServiceError {
       ),
     },
     _ => match err.to_string().as_str() {
-      _row_count_err => ServiceError::new(StatusCode::BAD_REQUEST, "Bad Request"),
+      _row_count_err => {
+        ServiceError::new(StatusCode::BAD_REQUEST, "Bad Request: err: _row_count_err")
+      }
       _ => ServiceError::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Database error: ".to_owned() + &err.to_string(),

@@ -6,5 +6,5 @@ CREATE TABLE room_member (
   created_at timestamp with time zone DEFAULT now() NOT NULL,
   last_joined_at timestamp with time zone DEFAULT now() NOT NULL,
   deleted_at timestamp with time zone DEFAULT NULL,
-  unique (room_id, user_id)
+  unique (room_id, user_id, deleted_at)
 )
