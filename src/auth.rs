@@ -1,16 +1,17 @@
+use crate::db::user::{get_user as get_user_from_db, get_user_by_id, insert_new_user};
+use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
 use crate::{errors::ServiceError, ConnectionPool};
 use axum::{
+  extract::State,
   headers::{authorization::Bearer, Authorization},
   http::{Request, StatusCode},
   middleware::Next,
   response::Response,
-  TypedHeader, extract::State,
+  TypedHeader,
 };
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use crate::db::user::{get_user as get_user_from_db, get_user_by_id, insert_new_user};
-use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]

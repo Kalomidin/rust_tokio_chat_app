@@ -1,8 +1,8 @@
 use super::models::{CreateRoomRequest, RemoveUserRequest};
 
-use crate::db::member::{create_new_member, delete_member, count_active_members};
-use crate::db::room::{create_new_room, get_room_by_id, delete_room};
-use crate::db::user::{get_user_by_name};
+use crate::db::member::{count_active_members, create_new_member, delete_member, get_member};
+use crate::db::room::{create_new_room, delete_room, get_room_by_id};
+use crate::db::user::get_user_by_name;
 
 use crate::errors::ServiceError;
 use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
@@ -42,7 +42,7 @@ pub async fn create_room(
 pub async fn join_room(
   ws: WebSocketUpgrade,
   State(pool): State<ConnectionPool>,
-  State(lobby): State<Arc<Lobby>>,
+  Extension(lobby): Extension<Arc<Lobby>>,
   Extension(user_id): Extension<i64>,
   Path(room_id): Path<i64>,
 ) -> Result<impl IntoResponse, ServiceError> {
@@ -56,12 +56,15 @@ pub async fn join_room(
       "Room is deleted",
     ));
   }
-  create_new_member(&mut _conn, room.id, user_id)
-    .await
-    .map_err(db_error_to_service_error)?;
+  let member = match get_member(&mut _conn, room_id, user_id).await {
+    Ok(member) => member,
+    Err(_) => create_new_member(&mut _conn, room.id, user_id)
+      .await
+      .map_err(db_error_to_service_error)?,
+  };
 
   // Create web socket conn
-  Ok(ws.on_upgrade(move |socket| upgrade_to_websocket(socket, lobby, user_id)))
+  Ok(ws.on_upgrade(move |socket| upgrade_to_websocket(socket, lobby, user_id, room, member.id)))
 }
 
 pub async fn leave_room(
@@ -81,17 +84,19 @@ pub async fn leave_room(
     .await
     .map_err(db_error_to_service_error)?;
   if active_member_count == 0 {
-    delete_room(&mut conn, room_id).await.map_err(db_error_to_service_error)?;
+    delete_room(&mut conn, room_id)
+      .await
+      .map_err(db_error_to_service_error)?;
   }
-  
+
   Ok(Json(serde_json::json!({
-    "roomName": room.name,
-    "createdAt": room.created_at,
-    "memberCreatedAt": member.created_at,
-    "memberDeletedAt": member.deleted_at,
-    "memberId": member.id,
-    "activeMembersCount": active_member_count,
-    })))
+  "roomName": room.name,
+  "createdAt": room.created_at,
+  "memberCreatedAt": member.created_at,
+  "memberDeletedAt": member.deleted_at,
+  "memberId": member.id,
+  "activeMembersCount": active_member_count,
+  })))
 }
 
 pub async fn remove_member(
@@ -105,13 +110,15 @@ pub async fn remove_member(
     .await
     .map_err(db_error_to_service_error)?;
   if user_id != room.created_by {
-    return Err(ServiceError::new(StatusCode::UNAUTHORIZED, "Unauthorized".to_string()));
+    return Err(ServiceError::new(
+      StatusCode::UNAUTHORIZED,
+      "Unauthorized".to_string(),
+    ));
   }
   let member_name = remove_user_request.user_name;
   let user = get_user_by_name(&mut conn, member_name)
     .await
     .map_err(db_error_to_service_error)?;
-
 
   delete_member(&mut conn, room.id, user.id)
     .await
@@ -121,14 +128,16 @@ pub async fn remove_member(
     .await
     .map_err(db_error_to_service_error)?;
   if active_member_count == 0 {
-    delete_room(&mut conn, room_id).await.map_err(db_error_to_service_error)?;
+    delete_room(&mut conn, room_id)
+      .await
+      .map_err(db_error_to_service_error)?;
   }
-  
+
   Ok(Json(serde_json::json!({
-    "roomName": room.name,
-    "createdAt": room.created_at,
-    "removedUserId": user.id,
-    "removedUserName": user.name,
-    "activeMembersCount": active_member_count,
-    })))
+  "roomName": room.name,
+  "createdAt": room.created_at,
+  "removedUserId": user.id,
+  "removedUserName": user.name,
+  "activeMembersCount": active_member_count,
+  })))
 }

@@ -33,7 +33,6 @@ pub async fn get_user(
   Ok(row_to_user(row))
 }
 
-
 pub async fn get_user_by_name(
   conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
   name: String,
