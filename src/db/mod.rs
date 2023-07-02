@@ -7,6 +7,7 @@ use tokio_postgres::{config::Config, NoTls};
 use tokio_postgres_migration::Migration;
 
 pub mod member;
+pub mod message;
 pub mod room;
 pub mod user;
 

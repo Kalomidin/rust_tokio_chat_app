@@ -41,7 +41,7 @@ where
 }
 
 pub fn db_error_to_service_error(err: tokio_postgres::Error) -> ServiceError {
-  let row_count_err = "query returned an unexpected number of rows";
+  let _row_count_err = "query returned an unexpected number of rows";
   match err.code() {
     Some(sql_state) => match sql_state.code() {
       "23503" => ServiceError::new(StatusCode::BAD_REQUEST, "foreign key violation"),
@@ -53,7 +53,7 @@ pub fn db_error_to_service_error(err: tokio_postgres::Error) -> ServiceError {
       ),
     },
     _ => match err.to_string().as_str() {
-      row_count_err => ServiceError::new(StatusCode::BAD_REQUEST, "Bad Request"),
+      _row_count_err => ServiceError::new(StatusCode::BAD_REQUEST, "Bad Request"),
       _ => ServiceError::new(
         StatusCode::INTERNAL_SERVER_ERROR,
         "Database error: ".to_owned() + &err.to_string(),

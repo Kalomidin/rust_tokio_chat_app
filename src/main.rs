@@ -2,21 +2,20 @@ use axum::{routing::delete, routing::get, routing::post, Extension, Router};
 
 use axum::middleware;
 use dotenv::dotenv;
-use futures::{sink::SinkExt, stream::StreamExt};
+
 use rust_tokio_chat_app::auth::guard;
 use rust_tokio_chat_app::db::setup_conn_pool;
 use rust_tokio_chat_app::routes::room::{create_room, join_room, leave_room, remove_member};
 use rust_tokio_chat_app::routes::user::{get_user, login, signup};
 use rust_tokio_chat_app::ws::lobby::Lobby;
 use std::{
-  collections::HashSet,
-  sync::{Arc, Mutex},
+  sync::{Arc},
 };
-use tokio::sync::broadcast;
+
 
 //allows to extract the IP of connecting user
-use axum::extract::connect_info::ConnectInfo;
-use axum::extract::ws::CloseFrame;
+
+
 use std::net::SocketAddr;
 
 #[tokio::main]

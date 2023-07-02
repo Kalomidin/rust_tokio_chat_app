@@ -2,7 +2,7 @@ use super::models::{CreateRoomRequest, RemoveUserRequest};
 
 use crate::db::member::{count_active_members, create_new_member, delete_member, get_member};
 use crate::db::room::{create_new_room, delete_room, get_room_by_id};
-use crate::db::user::get_user_by_name;
+use crate::db::user::{get_user_by_name, get_user_by_id};
 
 use crate::errors::ServiceError;
 use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
@@ -12,10 +12,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{extract::Extension, extract::Path, extract::State, extract::WebSocketUpgrade, Json};
 use std::{
-  collections::HashSet,
-  sync::{Arc, Mutex},
+  sync::{Arc},
 };
-use tokio::sync::broadcast;
+
 
 pub async fn create_room(
   State(pool): State<ConnectionPool>,
@@ -62,9 +61,10 @@ pub async fn join_room(
       .await
       .map_err(db_error_to_service_error)?,
   };
+  let user = get_user_by_id(&mut _conn, user_id).await.map_err(db_error_to_service_error)?;
 
   // Create web socket conn
-  Ok(ws.on_upgrade(move |socket| upgrade_to_websocket(socket, lobby, user_id, room, member.id)))
+  Ok(ws.on_upgrade(move |socket| upgrade_to_websocket(socket, lobby, user_id, room, member, user.name)))
 }
 
 pub async fn leave_room(

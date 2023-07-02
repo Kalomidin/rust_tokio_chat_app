@@ -1,15 +1,12 @@
 use axum::{
-  extract::ws::{Message, WebSocket, WebSocketUpgrade},
-  response::IntoResponse,
-  routing::get,
-  Router,
+  extract::ws::{Message, WebSocket},
 };
-use bb8::{ManageConnection, Pool};
+use bb8::{Pool};
 use bb8_postgres::PostgresConnectionManager;
 
 use super::ClientWsMessage;
-use tokio_postgres::{config::Config, NoTls};
-use tokio_postgres_migration::Migration;
+use tokio_postgres::{NoTls};
+
 
 use std::{
   collections::{HashMap, HashSet},
@@ -20,11 +17,18 @@ use futures_util::{
   stream::{SplitSink, SplitStream, StreamExt},
   SinkExt,
 };
-use std::net::SocketAddr;
+
 use std::ops::ControlFlow;
 use tokio::sync::broadcast;
 
-use crate::db::room::Room;
+use crate::db::member::{Member};
+use crate::db::message::{add_message};
+use crate::errors::{internal_error_to_service_error};
+
+use crate::{
+  db::room::{Room},
+  errors::ServiceError,
+};
 
 pub struct Lobby {
   // We require unique usernames. This tracks which usernames have been taken.
@@ -65,7 +69,8 @@ pub async fn upgrade_to_websocket(
   state: Arc<Lobby>,
   user_id: i64,
   room: Room,
-  member_id: i64,
+  member: Member,
+  user_name: String,
 ) {
   // By splitting we can send and receive at the same time.
   let (sender, receiver) = stream.split();
@@ -91,14 +96,28 @@ pub async fn upgrade_to_websocket(
 
   let rx = tx.subscribe();
 
-  let mut sender_task = create_sender_task(sender, rx, member_id);
+  let rx_db = tx.subscribe();
 
-  let mut receiver_task = create_receiver_task(receiver, tx, member_id);
+  let mut db_write_task = create_db_write_task(room.id, rx_db, state.pool.clone());
+
+  let mut sender_task = create_sender_task(sender, rx, member.clone());
+
+  let mut receiver_task = create_receiver_task(receiver, tx, member, user_name);
 
   // If any one of the tasks run to completion, we abort the other.
   tokio::select! {
-      _ = (&mut sender_task) => receiver_task.abort(),
-      _ = (&mut receiver_task) => sender_task.abort(),
+      _ = (&mut sender_task) => {
+        receiver_task.abort();
+        db_write_task.abort();
+      },
+      _ = (&mut receiver_task) => {
+        sender_task.abort();
+        db_write_task.abort();
+      },
+      _ = (&mut db_write_task) => {
+        sender_task.abort();
+        receiver_task.abort();
+      },
   };
 
   // send "user left" message
@@ -116,16 +135,53 @@ pub async fn upgrade_to_websocket(
   // update db status for member's table
 }
 
+fn create_db_write_task(
+  room_id: i64,
+  mut rx: broadcast::Receiver<String>,
+  pool: bb8::Pool<bb8_postgres::PostgresConnectionManager<NoTls>>,
+) -> tokio::task::JoinHandle<Result<(), ServiceError>> {
+  tokio::spawn(async move {
+    while let Ok(msg) = rx.recv().await {
+      match serde_json::from_str::<ClientWsMessage>(&msg) {
+        Ok(m) => {
+          let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
+          if add_message(
+            &mut conn,
+            room_id,
+            m.member_id,
+            m.member_name,
+          )
+          .await
+          .is_err()
+          {
+            println!(
+              "error saving msg: {:?} from {} in to db",
+              m.member_id, m.message
+            );
+          } else {
+            println!(">>> {} sent msg: {:?} saved in db", m.member_id, m.message);
+          }
+        }
+        _ => {
+          println!("error parsing message");
+        }
+      }
+    }
+    Ok(())
+  })
+}
+
 fn create_receiver_task(
   mut receiver: SplitStream<WebSocket>,
   tx: broadcast::Sender<String>,
-  member_id: i64,
+  member: Member,
+  member_name: String,
 ) -> tokio::task::JoinHandle<()> {
   tokio::spawn(async move {
     while let Some(msg) = receiver.next().await {
       // In any websocket error, break loop.
       // TODO: handle msg error
-      if process_message(tx.clone(), msg.unwrap(), member_id).is_break() {
+      if process_message(tx.clone(), msg.unwrap(), member_name.clone(), member.id).is_break() {
         break;
       }
     }
@@ -135,14 +191,14 @@ fn create_receiver_task(
 fn create_sender_task(
   mut sender: SplitSink<WebSocket, Message>,
   mut rx: broadcast::Receiver<String>,
-  member_id: i64,
+  member: Member,
 ) -> tokio::task::JoinHandle<()> {
   tokio::spawn(async move {
     while let Ok(msg) = rx.recv().await {
       match serde_json::from_str::<ClientWsMessage>(&msg) {
         Ok(m) => {
           // In any websocket error, break loop.
-          if member_id != m.member_id
+          if member.id != m.member_id
             && sender
               .send(Message::Text(m.message.to_owned()))
               .await
@@ -150,13 +206,13 @@ fn create_sender_task(
           {
             println!(
               "error sending message from {} to {}",
-              m.member_id, member_id
+              m.member_id, member.id
             );
             break;
           } else {
             println!(
               ">>> {} sent str: {:?} to {}",
-              m.member_id, m.message, member_id
+              m.member_id, m.message, member.id
             );
           }
         }
@@ -172,6 +228,7 @@ fn create_sender_task(
 fn process_message(
   tx: broadcast::Sender<String>,
   msg: Message,
+  member_name: String,
   member_id: i64,
 ) -> ControlFlow<(), ()> {
   match msg {
@@ -180,13 +237,12 @@ fn process_message(
       tx.send(
         serde_json::to_string(&ClientWsMessage {
           member_id,
+          member_name,
           message: t,
         })
         .unwrap(),
       )
       .unwrap();
-
-      // TODO: add into message table
     }
     Message::Binary(d) => {
       println!(">>> {} sent {} bytes: {:?}", member_id, d.len(), d);
