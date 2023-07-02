@@ -33,6 +33,16 @@ pub async fn get_user(
   Ok(row_to_user(row))
 }
 
+
+pub async fn get_user_by_name(
+  conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
+  name: String,
+) -> Result<User, tokio_postgres::Error> {
+  let query = "SELECT * FROM users WHERE name = $1";
+  let row = conn.query_one(query, &[&name]).await?;
+  Ok(row_to_user(row))
+}
+
 pub async fn get_user_by_id(
   conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
   id: i64,

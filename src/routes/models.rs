@@ -19,3 +19,9 @@ pub struct LoginRequest {
 pub struct CreateRoomRequest {
   pub name: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all(deserialize = "camelCase"))]
+pub struct RemoveUserRequest {
+  pub user_name: String,
+}

@@ -1,14 +1,16 @@
-use crate::errors::ServiceError;
+use crate::{errors::ServiceError, ConnectionPool};
 use axum::{
   headers::{authorization::Bearer, Authorization},
   http::{Request, StatusCode},
   middleware::Next,
   response::Response,
-  TypedHeader,
+  TypedHeader, extract::State,
 };
 use chrono::Utc;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use crate::db::user::{get_user as get_user_from_db, get_user_by_id, insert_new_user};
+use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all(serialize = "camelCase", deserialize = "camelCase"))]
@@ -64,6 +66,7 @@ fn validate_token(token: &str) -> Result<Claim, jsonwebtoken::errors::Error> {
 }
 
 pub async fn guard<T>(
+  State(pool): State<ConnectionPool>,
   TypedHeader(token): TypedHeader<Authorization<Bearer>>,
   mut request: Request<T>,
   next: Next<T>,
@@ -72,6 +75,12 @@ pub async fn guard<T>(
   let _claim = validate_token(&token);
   match _claim {
     Ok(claim) => {
+      let user_id = claim.user_id;
+      let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
+      get_user_by_id(&mut _conn, user_id)
+        .await
+        .map_err(db_error_to_service_error)?;
+
       request.extensions_mut().insert(claim.user_id);
     }
     Err(_) => {

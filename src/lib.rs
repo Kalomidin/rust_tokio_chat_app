@@ -1,4 +1,3 @@
-
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::NoTls;

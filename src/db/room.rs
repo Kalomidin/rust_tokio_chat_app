@@ -43,6 +43,16 @@ pub async fn get_room_by_id(
   Ok(row_to_room(row))
 }
 
+pub async fn delete_room(
+  conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
+  id: i64,
+) -> Result<Room, tokio_postgres::Error> {
+  let query = "UPDATE room SET deleted_at = NOW() WHERE id = $1 AND deleted_at is NULL";
+  conn.execute(query, &[&id]).await?;
+  let room = get_room_by_id(conn, id).await?;
+  Ok(room)
+}
+
 fn row_to_room(row: tokio_postgres::Row) -> Room {
   let id: i64 = row.get(0);
   let name: String = row.get(1);

@@ -1,7 +1,6 @@
 use axum::{http::StatusCode, response::IntoResponse, Json};
 use serde::Serialize;
 
-
 #[derive(Debug)]
 pub struct ServiceError {
   code: StatusCode,
@@ -41,20 +40,24 @@ where
   ServiceError::new(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
 }
 
-
-pub fn db_error_to_service_error(err: tokio_postgres::Error) -> ServiceError
-{
+pub fn db_error_to_service_error(err: tokio_postgres::Error) -> ServiceError {
   let row_count_err = "query returned an unexpected number of rows";
   match err.code() {
     Some(sql_state) => match sql_state.code() {
       "23503" => ServiceError::new(StatusCode::BAD_REQUEST, "foreign key violation"),
       "23505" => ServiceError::new(StatusCode::BAD_REQUEST, "unique key violation"),
       "P0002" => ServiceError::new(StatusCode::BAD_REQUEST, "Invalid input"),
-      _ => ServiceError::new(StatusCode::INTERNAL_SERVER_ERROR, "Database error: ".to_owned() + sql_state.code()),
-    }
+      _ => ServiceError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Database error: ".to_owned() + sql_state.code(),
+      ),
+    },
     _ => match err.to_string().as_str() {
       row_count_err => ServiceError::new(StatusCode::BAD_REQUEST, "No rows found"),
-      _ => ServiceError::new(StatusCode::INTERNAL_SERVER_ERROR, "Database error: ".to_owned() + &err.to_string()),
+      _ => ServiceError::new(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Database error: ".to_owned() + &err.to_string(),
+      ),
     },
   }
 }

@@ -1,7 +1,7 @@
 use super::models::{LoginRequest, NewUserRequest};
 use crate::auth::create_jwt;
 use crate::db::user::{get_user as get_user_from_db, get_user_by_id, insert_new_user};
-use crate::errors::{internal_error_to_service_error, db_error_to_service_error, ServiceError};
+use crate::errors::{db_error_to_service_error, internal_error_to_service_error, ServiceError};
 use crate::ConnectionPool;
 use axum::{extract::Extension, extract::State, Json};
 

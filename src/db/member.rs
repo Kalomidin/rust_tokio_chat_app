@@ -30,7 +30,7 @@ pub async fn get_member(
   room_id: i64,
   member_id: i64,
 ) -> Result<Member, tokio_postgres::Error> {
-  let query = "SELECT * FROM room_member WHERE room_id = $1 AND member_id = $2";
+  let query = "SELECT * FROM room_member WHERE room_id = $1 AND member_id = $2  AND deleted_at is NULL";
   let row = conn.query_one(query, &[&room_id, &member_id]).await?;
   Ok(row_to_member(row))
 }
@@ -39,9 +39,31 @@ pub async fn get_member_by_id(
   conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
   id: i64,
 ) -> Result<Member, tokio_postgres::Error> {
-  let query = "SELECT * FROM room_member WHERE id = $1";
+  let query = "SELECT * FROM room_member WHERE id = $1  AND deleted_at is NULL";
   let row = conn.query_one(query, &[&id]).await?;
   Ok(row_to_member(row))
+}
+
+
+pub async fn delete_member(
+  conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
+  room_id: i64,
+  member_id: i64,
+) -> Result<Member, tokio_postgres::Error> {
+  let query = "UPDATE room_member SET deleted_at = NOW() WHERE room_id = $1 AND member_id = $2 AND deleted_at is NULL";
+  conn.execute(query, &[&room_id, &member_id]).await?;
+  let room = get_member(conn, room_id, member_id).await?;
+  Ok(room)
+}
+
+pub async fn count_active_members(
+  conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
+  room_id: i64,
+)-> Result<i64, tokio_postgres::Error> {
+  let query = "SELECT COUNT(*) FROM room_member WHERE room_id = $1 AND deleted_at is NULL";
+  let rows = conn.query(query, &[&room_id]).await?;
+  let count: i64 = rows[0].get(0);
+  Ok(count)
 }
 
 fn row_to_member(row: tokio_postgres::Row) -> Member {
