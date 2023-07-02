@@ -1,0 +1,18 @@
+[package]
+name = "rust_tokio_chat_app"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "1.16.1", features = ["full"] }
+chrono = { version = "0.4.23", features = ["serde"] }
+serde = {version = "1.0.147", features = ["derive"]}
+serde_json = "1.0.88"
+tokio-postgres = "0.7.8"
+tokio-postgres-migration = "0.1.0"
+axum = "0.6.18"
+bb8-postgres = "0.8.1"
+bb8 = "0.8.1"
+dotenv = "0.15.0"
