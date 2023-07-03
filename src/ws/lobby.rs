@@ -157,7 +157,7 @@ pub fn remove_user_from_room(
     },
     Err(e) => {
       println!(
-        ">>> ws task terminating with joining the task, err: {}, user: {}",
+        ">>> ws task terminating with join err, err: {}, user: {}",
         e, user_id
       );
       format!("{} user faced some issues... disconnecting", user_name)
