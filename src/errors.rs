@@ -14,6 +14,10 @@ impl ServiceError {
       message: message.into(),
     }
   }
+
+  pub fn message(&self) -> &str {
+    &self.message
+  }
 }
 
 impl IntoResponse for ServiceError {

@@ -6,7 +6,7 @@ use crate::db::user::{get_user_by_id, get_user_by_name};
 
 use crate::errors::ServiceError;
 use crate::errors::{db_error_to_service_error, internal_error_to_service_error};
-use crate::ws::lobby::{remove_user_from_room, upgrade_to_websocket, Lobby};
+use crate::ws::lobby::{upgrade_to_websocket, Lobby};
 use crate::ws::{ClientWsMessage, ClientWsMessageType};
 use crate::ConnectionPool;
 use axum::http::StatusCode;
@@ -106,6 +106,7 @@ pub async fn leave_room(
           member_name: user_name,
           message_type: ClientWsMessageType::Leave,
           message: "left the room by user's request".to_owned(),
+          db_skip_write: true,
         })
         .unwrap(),
       )
@@ -168,6 +169,7 @@ pub async fn remove_member(
           member_name: user_name,
           message_type: ClientWsMessageType::Leave,
           message: "user is kicked".to_owned(),
+          db_skip_write: true,
         })
         .unwrap(),
       )

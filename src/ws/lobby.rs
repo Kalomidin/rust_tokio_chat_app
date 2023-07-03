@@ -2,7 +2,7 @@ use axum::extract::ws::{Message, WebSocket};
 use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 
-use super::{ClientWsMessage, ClientWsMessageType};
+use super::{ClientWsMessage, ClientWsMessageType, ServerTaskTerminationReason};
 use tokio_postgres::NoTls;
 
 use std::{
@@ -100,26 +100,29 @@ pub async fn upgrade_to_websocket(
   let mut receiver_task = create_receiver_task(receiver, tx.clone(), member, user_name.clone());
 
   // If any one of the tasks run to completion, we abort the other.
-  tokio::select! {
-      _ = (&mut sender_task) => {
+  let reason = tokio::select! {
+      reason = (&mut sender_task) => {
         println!("sender task completed, member_id: {}, room_id: {}", member_id, room.id);
         receiver_task.abort();
         db_write_task.abort();
+        reason
       },
-      _ = (&mut receiver_task) => {
+      reason = (&mut receiver_task) => {
         println!("receiver task completed, member_id: {}, room_id: {}", member_id, room.id);
         sender_task.abort();
         db_write_task.abort();
+        reason
       },
-      _ = (&mut db_write_task) => {
+      reason = (&mut db_write_task) => {
         println!("db write task completed, member_id: {}, room_id: {}", member_id, room.id);
         sender_task.abort();
         receiver_task.abort();
+        reason
       },
   };
 
   let room_id: i64 = room.id;
-  remove_user_from_room(member_id, user_id, room_id, user_name, tx, state);
+  remove_user_from_room(member_id, user_id, room_id, user_name, tx, state, reason);
 }
 
 pub fn remove_user_from_room(
@@ -129,15 +132,45 @@ pub fn remove_user_from_room(
   user_name: String,
   tx: broadcast::Sender<String>,
   state: Arc<Lobby>,
+  reason: Result<Result<ServerTaskTerminationReason, ServiceError>, tokio::task::JoinError>,
 ) {
-  // send "user left" message
-  let msg = ClientWsMessage {
+  let mut db_skip_write = true;
+  let msg = match reason {
+    Ok(reason) => match reason {
+      Ok(reason) => match reason {
+        ServerTaskTerminationReason::ClientDisconnected => {
+          format!("{} disconnected from the room", user_name)
+        }
+        ServerTaskTerminationReason::ClientLeft => {
+          db_skip_write = false;
+          format!("{} left the room", user_name)
+        }
+      },
+      Err(e) => {
+        println!(
+          ">>> ws task terminating with error: {} for user: {}",
+          e.message(),
+          user_id
+        );
+        format!("{} user faced some issues... disconnecting", user_name)
+      }
+    },
+    Err(e) => {
+      println!(
+        ">>> ws task terminating with joining the task, err: {}, user: {}",
+        e, user_id
+      );
+      format!("{} user faced some issues... disconnecting", user_name)
+    }
+  };
+  let ws_msg = ClientWsMessage {
     member_id,
     message_type: ClientWsMessageType::Message,
     member_name: user_name.clone(),
-    message: format!("{} left the room", user_name),
+    message: msg,
+    db_skip_write,
   };
-  tx.send(serde_json::to_string(&msg).unwrap()).unwrap();
+  tx.send(serde_json::to_string(&ws_msg).unwrap()).unwrap();
   {
     // remove the user from the room
     let mut rooms = state.rooms.lock().unwrap();
@@ -179,11 +212,15 @@ fn create_db_write_task(
   room_id: i64,
   mut rx: broadcast::Receiver<String>,
   pool: bb8::Pool<bb8_postgres::PostgresConnectionManager<NoTls>>,
-) -> tokio::task::JoinHandle<Result<(), ServiceError>> {
+) -> tokio::task::JoinHandle<Result<ServerTaskTerminationReason, ServiceError>> {
   tokio::spawn(async move {
     while let Ok(msg) = rx.recv().await {
       match serde_json::from_str::<ClientWsMessage>(&msg) {
         Ok(m) => {
+          if m.db_skip_write {
+            println!(">>> skipping db write for msg: {:?}", m.message);
+            continue;
+          }
           let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
           match add_message(&mut conn, room_id, m.member_id, &m.message).await {
             Ok(_) => {
@@ -202,7 +239,7 @@ fn create_db_write_task(
         }
       }
     }
-    Ok(())
+    Ok(ServerTaskTerminationReason::ClientDisconnected)
   })
 }
 
@@ -211,7 +248,7 @@ fn create_receiver_task(
   tx: broadcast::Sender<String>,
   member: Member,
   member_name: String,
-) -> tokio::task::JoinHandle<()> {
+) -> tokio::task::JoinHandle<Result<ServerTaskTerminationReason, ServiceError>> {
   tokio::spawn(async move {
     while let Some(msg) = receiver.next().await {
       // In any websocket error, break loop.
@@ -220,6 +257,7 @@ fn create_receiver_task(
         break;
       }
     }
+    Ok(ServerTaskTerminationReason::ClientDisconnected)
   })
 }
 
@@ -227,7 +265,7 @@ fn create_sender_task(
   mut sender: SplitSink<WebSocket, Message>,
   mut rx: broadcast::Receiver<String>,
   member: Member,
-) -> tokio::task::JoinHandle<()> {
+) -> tokio::task::JoinHandle<Result<ServerTaskTerminationReason, ServiceError>> {
   tokio::spawn(async move {
     while let Ok(msg) = rx.recv().await {
       match serde_json::from_str::<ClientWsMessage>(&msg) {
@@ -238,7 +276,7 @@ fn create_sender_task(
               if sender.send(msg).await.is_err() {
                 break;
               }
-              return;
+              return Ok(ServerTaskTerminationReason::ClientLeft);
             }
           }
           ClientWsMessageType::Message => {
@@ -267,6 +305,7 @@ fn create_sender_task(
         }
       }
     }
+    Ok(ServerTaskTerminationReason::ClientDisconnected)
   })
 }
 
@@ -286,6 +325,7 @@ fn process_message(
           member_name,
           message_type: ClientWsMessageType::Message,
           message: t,
+          db_skip_write: false,
         })
         .unwrap(),
       )
