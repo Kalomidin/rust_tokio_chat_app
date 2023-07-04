@@ -9,8 +9,8 @@ pub async fn signup(
   State(pool): State<ConnectionPool>,
   Json(user): Json<NewUserRequest>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-  let user = insert_new_user(&mut _conn, user.name, user.password)
+  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let user = insert_new_user(&mut conn, user.name, user.password)
     .await
     .map_err(db_error_to_service_error)?;
   Ok(Json(serde_json::json!({
@@ -25,8 +25,8 @@ pub async fn login(
   State(pool): State<ConnectionPool>,
   Json(user): Json<LoginRequest>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-  let user = get_user_from_db(&mut _conn, user.name, user.password)
+  let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
+  let user = get_user_from_db(&mut conn, user.name, user.password)
     .await
     .map_err(db_error_to_service_error)?;
   Ok(Json(serde_json::json!({
@@ -41,8 +41,8 @@ pub async fn get_user(
   State(pool): State<ConnectionPool>,
   Extension(user_id): Extension<i64>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-  let user = get_user_by_id(&mut _conn, user_id)
+  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let user = get_user_by_id(&mut conn, user_id)
     .await
     .map_err(db_error_to_service_error)?;
   Ok(Json(serde_json::json!({

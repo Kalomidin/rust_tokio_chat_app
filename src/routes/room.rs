@@ -19,11 +19,11 @@ pub async fn create_room(
   Extension(user_id): Extension<i64>,
   Json(create_room_request): Json<CreateRoomRequest>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-  let room = create_new_room(&mut _conn, create_room_request.name, user_id)
+  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let room = create_new_room(&mut conn, create_room_request.name, user_id)
     .await
     .map_err(db_error_to_service_error)?;
-  let member = create_new_member(&mut _conn, room.id, user_id)
+  let member = create_new_member(&mut conn, room.id, user_id)
     .await
     .map_err(db_error_to_service_error)?;
 
@@ -43,8 +43,8 @@ pub async fn join_room(
   Extension(user_id): Extension<i64>,
   Path(room_id): Path<i64>,
 ) -> Result<impl IntoResponse, ServiceError> {
-  let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-  let room = get_room_by_id(&mut _conn, room_id)
+  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let room = get_room_by_id(&mut conn, room_id)
     .await
     .map_err(db_error_to_service_error)?;
   if room.deleted_at != None {
@@ -53,13 +53,13 @@ pub async fn join_room(
       "Room is deleted",
     ));
   }
-  let member = match get_member(&mut _conn, room_id, user_id).await {
+  let member = match get_member(&mut conn, room_id, user_id).await {
     Ok(member) => member,
-    Err(_) => create_new_member(&mut _conn, room.id, user_id)
+    Err(_) => create_new_member(&mut conn, room.id, user_id)
       .await
       .map_err(db_error_to_service_error)?,
   };
-  let user = get_user_by_id(&mut _conn, user_id)
+  let user = get_user_by_id(&mut conn, user_id)
     .await
     .map_err(db_error_to_service_error)?;
 

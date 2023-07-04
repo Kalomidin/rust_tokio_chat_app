@@ -77,8 +77,8 @@ pub async fn guard<T>(
   match _claim {
     Ok(claim) => {
       let user_id = claim.user_id;
-      let mut _conn = pool.get().await.map_err(internal_error_to_service_error)?;
-      get_user_by_id(&mut _conn, user_id)
+      let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
+      get_user_by_id(&mut conn, user_id)
         .await
         .map_err(db_error_to_service_error)?;
 
