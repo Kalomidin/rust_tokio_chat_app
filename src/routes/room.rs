@@ -19,7 +19,7 @@ pub async fn create_room(
   Extension(user_id): Extension<i64>,
   Json(create_room_request): Json<CreateRoomRequest>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let room = create_new_room(&mut conn, create_room_request.name, user_id)
     .await
     .map_err(db_error_to_service_error)?;
@@ -43,7 +43,7 @@ pub async fn join_room(
   Extension(user_id): Extension<i64>,
   Path(room_id): Path<i64>,
 ) -> Result<impl IntoResponse, ServiceError> {
-  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let room = get_room_by_id(&mut conn, room_id)
     .await
     .map_err(db_error_to_service_error)?;
@@ -78,10 +78,25 @@ pub async fn leave_room(
   let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let room = get_room_by_id(&mut conn, room_id)
     .await
-    .map_err(db_error_to_service_error)?;
+    .map_err(db_error_to_service_error);
+  if let Err(_) = room {
+    return Err(ServiceError::new(
+      StatusCode::BAD_REQUEST,
+      "Room does not exist",
+    ));
+  }
+  let room = room.unwrap();
+
   let deleted_member_id = delete_member(&mut conn, room.id, user_id)
     .await
-    .map_err(db_error_to_service_error)?;
+    .map_err(db_error_to_service_error);
+  if let Err(_) = deleted_member_id {
+    return Err(ServiceError::new(
+      StatusCode::BAD_REQUEST,
+      "User is not a member of the room",
+    ));
+  }
+  let deleted_member_id = deleted_member_id.unwrap();
 
   let active_member_count = count_active_members(&mut conn, room.id)
     .await
@@ -132,7 +147,15 @@ pub async fn remove_member(
   let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let room = get_room_by_id(&mut conn, room_id)
     .await
-    .map_err(db_error_to_service_error)?;
+    .map_err(db_error_to_service_error);
+  if let Err(_) = room {
+    return Err(ServiceError::new(
+      StatusCode::BAD_REQUEST,
+      "Room does not exist",
+    ));
+  }
+  let room = room.unwrap();
+
   if user_id != room.created_by {
     return Err(ServiceError::new(
       StatusCode::UNAUTHORIZED,
@@ -146,7 +169,14 @@ pub async fn remove_member(
 
   let deleted_member_id = delete_member(&mut conn, room.id, user.id)
     .await
-    .map_err(db_error_to_service_error)?;
+    .map_err(db_error_to_service_error);
+  if let Err(_) = deleted_member_id {
+    return Err(ServiceError::new(
+      StatusCode::BAD_REQUEST,
+      "User is not a member of the room",
+    ));
+  }
+  let deleted_member_id = deleted_member_id.unwrap();
 
   let active_member_count = count_active_members(&mut conn, room.id)
     .await
@@ -160,21 +190,27 @@ pub async fn remove_member(
   let user_name = user.name.clone();
   {
     let mut lobby_mutex = lobby.rooms.lock().unwrap();
-    let room = lobby_mutex.get_mut(&room_id).unwrap();
-    room
-      .tx
-      .send(
-        serde_json::to_string(&ClientWsMessage {
-          member_id: deleted_member_id,
-          member_name: user_name,
-          message_type: ClientWsMessageType::Leave,
-          message: "user is kicked".to_owned(),
-          db_skip_write: true,
-        })
-        .unwrap(),
-      )
-      .unwrap();
-    println!("Sent kick message to user {:}", user_id);
+    match lobby_mutex.get_mut(&room_id) {
+      Some(room) => {
+        room
+          .tx
+          .send(
+            serde_json::to_string(&ClientWsMessage {
+              member_id: deleted_member_id,
+              member_name: user_name,
+              message_type: ClientWsMessageType::Leave,
+              message: "user is kicked".to_owned(),
+              db_skip_write: true,
+            })
+            .unwrap(),
+          )
+          .unwrap();
+        println!("Sent kick message to user {:}", user_id);
+      }
+      _ => {
+        // this means user created the room but noone joined it
+      }
+    }
   }
 
   Ok(Json(serde_json::json!({

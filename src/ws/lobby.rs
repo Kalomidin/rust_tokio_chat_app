@@ -281,6 +281,8 @@ fn create_sender_task(
           }
           ClientWsMessageType::Message => {
             // In any websocket error, break loop.
+            // we are skipping for now sending back user's own message
+            // this can be an issue if we want to support multiple sessions for same user
             if member.id != m.member_id
               && sender
                 .send(Message::Text(m.message.to_owned()))

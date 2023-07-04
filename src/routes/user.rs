@@ -9,7 +9,7 @@ pub async fn signup(
   State(pool): State<ConnectionPool>,
   Json(user): Json<NewUserRequest>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let user = insert_new_user(&mut conn, user.name, user.password)
     .await
     .map_err(db_error_to_service_error)?;
@@ -41,7 +41,7 @@ pub async fn get_user(
   State(pool): State<ConnectionPool>,
   Extension(user_id): Extension<i64>,
 ) -> Result<Json<serde_json::Value>, ServiceError> {
-  let mut conn= pool.get().await.map_err(internal_error_to_service_error)?;
+  let mut conn = pool.get().await.map_err(internal_error_to_service_error)?;
   let user = get_user_by_id(&mut conn, user_id)
     .await
     .map_err(db_error_to_service_error)?;
