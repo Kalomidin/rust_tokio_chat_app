@@ -24,11 +24,15 @@ This project implements chat room owner functionality, allowing the owner to per
     ```bash
     docker-compose up -d
     ```
-3. Build and run the application using Cargo:
+3. Setup env variables:
+    ```bash
+    cp .env.local .env
+    ```
+4. Build and run the application using Cargo:
     ```bash
     cargo run
     ```
-4. Open the following Postman link to access the API documentation and test the endpoints [link](https://app.getpostman.com/join-team?invite_code=bfa2daa5a7cbadad1f29c50e8252ed1a&target_code=43cf5096b948cf03c2f1e73e40cd22c8)
-5. In Postman, you can create a user and a room to start enjoying the chatting experience.
+5. Open the following Postman link to access the API documentation and test the endpoints [link](https://app.getpostman.com/join-team?invite_code=bfa2daa5a7cbadad1f29c50e8252ed1a&target_code=43cf5096b948cf03c2f1e73e40cd22c8)
+6. In Postman, you can create a user and a room to start enjoying the chatting experience.
 
 Please note that you may need to adjust the steps based on your specific project setup or any additional requirements.

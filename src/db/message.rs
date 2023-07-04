@@ -24,6 +24,7 @@ pub async fn add_message(
   Ok(())
 }
 
+// unused for now as get unread messages is not implemented
 pub async fn get_unread_messages(
   conn: &mut PooledConnection<'_, PostgresConnectionManager<NoTls>>,
   room_id: i64,
